@@ -1,3 +1,11 @@
+/**
+ * SharedObject: synchronized access to a SharedArrayBuffer across threads.
+ *
+ * Provides a triple-buffered ring of data slots with a sequence lock for lock-free
+ * reads and a ticket-lock for serialized writes. TypedSharedObject wraps a
+ * SharedObject with a schema to provide typed read/write access.
+ */
+
 import { threadId as localThreadId } from "node:worker_threads";
 import {
   computeLayout,
@@ -6,6 +14,7 @@ import {
   type Layout,
   type SchemaDefinition,
   type SchemaValues,
+  type SchemaWriteValues,
 } from "./schema.js";
 
 const CTRL_PUBLISHED_SLOT = 0;
@@ -185,7 +194,7 @@ export class SharedObject {
   }
 
   private async waitForTurn(ticket: number): Promise<void> {
-    for (;;) {
+    for (; ;) {
       this.throwIfFatalWriteState();
 
       const servingTicket = Atomics.load(this.control, CTRL_SERVING_TICKET);
@@ -238,7 +247,7 @@ export class TypedSharedObject<S extends SchemaDefinition> {
     this.layout = computeLayout(schema);
   }
 
-  async write(values: Partial<SchemaValues<S>>): Promise<void> {
+  async write(values: Partial<SchemaWriteValues<S>>): Promise<void> {
     await this.inner.requestWrite(({ dataView }) => {
       writeFields(this.layout, dataView, values);
     });

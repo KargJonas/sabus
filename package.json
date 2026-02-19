@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "npm run build && node dist/main.js",
+    "example:reader-writer": "npm run build && node dist/examples/reader-writer/main.js",
+    "example:arrays": "npm run build && node dist/examples/arrays/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

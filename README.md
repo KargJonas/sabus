@@ -7,6 +7,7 @@ The idea is to use [SharedArrayBuffers](https://developer.mozilla.org/en-US/docs
 To facilitate coordinated reading and writing of SABs, this library uses the following system:
 - A central SharedRuntime spawns workers and allows creations of SharedObjects.
 - SharedObject is an abstraction over SharedArrayBuffer with:
+  - A clear schema definition that describes how data is laid out in the buffer and ensures type safety.
   - Write permission handling
   - An internal ring-buffer-like data structure to prevent reading incomplete writes
   - A system to notify subscribed workers of changes (this happens through message-passing)

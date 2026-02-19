@@ -1,17 +1,13 @@
-import SharedRuntime from "./shared-runtime.js";
-import { Type } from "./schema.js";
-
-const CounterSchema = {
-  value: Type.Int32,
-} as const;
+import SharedRuntime from "../../shared-runtime.js";
+import { CounterSchema } from "./counter-schema.js";
 
 const rt = SharedRuntime.host();
 
 const counter = rt.createSharedObject("counter", CounterSchema);
 
-await rt.spawnWorker("./reader-fast.worker.js", "reader-fast");
-await rt.spawnWorker("./reader-slow.worker.js", "reader-slow");
-await rt.spawnWorker("./reader-subscribed.worker.js", "reader-subscribed");
+await rt.spawnWorker(new URL("./reader-fast.worker.js", import.meta.url).href, "reader-fast");
+await rt.spawnWorker(new URL("./reader-slow.worker.js", import.meta.url).href, "reader-slow");
+await rt.spawnWorker(new URL("./reader-subscribed.worker.js", import.meta.url).href, "reader-subscribed");
 
 let current = 0;
 const writeIntervalMs = 100;

@@ -1,13 +1,11 @@
-import SharedRuntime from "./shared-runtime.js";
-import { Type } from "./schema.js";
-
-const CounterSchema = { value: Type.Int32 } as const;
+import SharedRuntime from "../../shared-runtime.js";
+import { CounterSchema } from "./counter-schema.js";
 
 const rt = await SharedRuntime.worker();
 const counter = rt.openSharedObject("counter", CounterSchema);
 
-const pollMs = 350;
-const threadName = "worker-slow";
+const pollMs = 140;
+const threadName = "worker-fast";
 
 setInterval(() => {
   const latest = counter.read();

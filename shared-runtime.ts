@@ -1,3 +1,11 @@
+/**
+ * SharedRuntime: orchestrates multi-threaded shared memory communication.
+ *
+ * In host mode, spawns workers and manages SharedObject creation/distribution.
+ * In worker mode, receives SharedObject descriptors from the host and provides
+ * access to them. Handles worker lifecycle and dead-writer detection.
+ */
+
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker, parentPort } from "node:worker_threads";

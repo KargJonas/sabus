@@ -9,5 +9,5 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["*.ts", "reader-fast.worker.ts", "reader-slow.worker.ts", "reader-subscribed.worker.ts", "main.ts"]
+  "include": ["*.ts", "examples/**/*.ts"]
 }

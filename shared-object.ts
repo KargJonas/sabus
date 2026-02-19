@@ -1,4 +1,12 @@
 import { threadId as localThreadId } from "node:worker_threads";
+import {
+  computeLayout,
+  readSnapshot,
+  writeFields,
+  type Layout,
+  type SchemaDefinition,
+  type SchemaValues,
+} from "./schema.js";
 
 const CTRL_PUBLISHED_SLOT = 0;
 const CTRL_SEQ = 1;
@@ -218,5 +226,31 @@ export class SharedObject {
         `Shared object "${this.id}" entered fatal state: a writer thread exited while holding the write lock`,
       );
     }
+  }
+}
+
+export class TypedSharedObject<S extends SchemaDefinition> {
+  readonly inner: SharedObject;
+  readonly layout: Layout<S>;
+
+  constructor(inner: SharedObject, schema: S) {
+    this.inner = inner;
+    this.layout = computeLayout(schema);
+  }
+
+  async write(values: Partial<SchemaValues<S>>): Promise<void> {
+    await this.inner.requestWrite(({ dataView }) => {
+      writeFields(this.layout, dataView, values);
+    });
+  }
+
+  read(): (SchemaValues<S> & { seq: number }) | null {
+    const snap = this.inner.readLatest();
+    if (!snap) return null;
+    return { ...readSnapshot(this.layout, snap.dataView), seq: snap.seq };
+  }
+
+  subscribe(callback: () => void): () => void {
+    return this.inner.subscribe(callback);
   }
 }

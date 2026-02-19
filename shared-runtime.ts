@@ -1,8 +1,9 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker, parentPort } from "node:worker_threads";
-import { SharedObject } from "./shared-object.js";
+import { SharedObject, TypedSharedObject } from "./shared-object.js";
 import type { SharedObjectConfig, SharedObjectDescriptor } from "./shared-object.js";
+import { computeLayout, type SchemaDefinition } from "./schema.js";
 
 type RuntimeMode = "host" | "worker";
 
@@ -123,10 +124,20 @@ export default class SharedRuntime {
     return { name };
   }
 
-  createSharedObject(id: string, config: SharedObjectConfig): SharedObject {
+  createSharedObject(id: string, config: SharedObjectConfig): SharedObject;
+  createSharedObject<S extends SchemaDefinition>(id: string, schema: S): TypedSharedObject<S>;
+  createSharedObject<S extends SchemaDefinition>(
+    id: string,
+    configOrSchema: SharedObjectConfig | S,
+  ): SharedObject | TypedSharedObject<S> {
     if (this.sharedObjects.has(id)) {
       throw new Error(`Shared object "${id}" already exists`);
     }
+
+    const isConfig = "byteLength" in configOrSchema && typeof configOrSchema.byteLength === "number";
+    const config: SharedObjectConfig = isConfig
+      ? (configOrSchema as SharedObjectConfig)
+      : { byteLength: computeLayout(configOrSchema as S).byteLength };
 
     const obj = SharedObject.create(id, config);
     this.sharedObjects.set(id, obj);
@@ -135,15 +146,21 @@ export default class SharedRuntime {
     for (const entry of this.workers.values()) {
       send(entry.worker, { type: "shared-object-created", sharedObject: descriptor });
     }
-    return obj;
+
+    return isConfig ? obj : new TypedSharedObject(obj, configOrSchema as S);
   }
 
-  openSharedObject(id: string): SharedObject {
+  openSharedObject(id: string): SharedObject;
+  openSharedObject<S extends SchemaDefinition>(id: string, schema: S): TypedSharedObject<S>;
+  openSharedObject<S extends SchemaDefinition>(
+    id: string,
+    schema?: S,
+  ): SharedObject | TypedSharedObject<S> {
     const obj = this.sharedObjects.get(id);
     if (!obj) {
       throw new Error(`Shared object "${id}" not found`);
     }
-    return obj;
+    return schema ? new TypedSharedObject(obj, schema) : obj;
   }
 
   private async waitForInit(): Promise<void> {

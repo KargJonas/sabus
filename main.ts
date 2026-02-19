@@ -1,18 +1,19 @@
 import SharedRuntime from "./shared-runtime.js";
+import { Type } from "./schema.js";
+
+const CounterSchema = {
+  value: Type.Int32,
+} as const;
 
 const rt = SharedRuntime.host();
 
-rt.createSharedObject("counter", {
-  byteLength: Int32Array.BYTES_PER_ELEMENT,
-});
+const counter = rt.createSharedObject("counter", CounterSchema);
 
 await rt.spawnWorker("./reader-fast.worker.js", "reader-fast");
 await rt.spawnWorker("./reader-slow.worker.js", "reader-slow");
 await rt.spawnWorker("./reader-subscribed.worker.js", "reader-subscribed");
 
-const counter = rt.openSharedObject("counter");
-
-let value = 0;
+let current = 0;
 const writeIntervalMs = 100;
 const maxWrites = 40;
 
@@ -20,13 +21,10 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
 
-while (value < maxWrites) {
-  await counter.requestWrite(({ dataView }) => {
-    dataView.setInt32(0, value, true);
-  });
-
-  console.log(`[main:writer] value=${value}`);
-  value += 1;
+while (current < maxWrites) {
+  await counter.write({ value: current });
+  console.log(`[main:writer] value=${current}`);
+  current += 1;
   await sleep(writeIntervalMs);
 }
 

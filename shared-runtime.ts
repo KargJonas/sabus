@@ -1,24 +1,18 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { Worker, parentPort, workerData } from "node:worker_threads";
+import { Worker, parentPort } from "node:worker_threads";
 import { SharedObject } from "./shared-object.js";
 import type { SharedObjectConfig, SharedObjectDescriptor } from "./shared-object.js";
 
 type RuntimeMode = "host" | "worker";
 
-interface WorkerBootstrapData {
-  name?: string;
-}
-
 interface InitMessage {
   type: "init";
-  name: string;
   sharedObjects: SharedObjectDescriptor[];
 }
 
 interface ReadyMessage {
   type: "ready";
-  name: string;
 }
 
 interface SharedObjectCreatedMessage {
@@ -47,18 +41,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isMessagePortLike(portLike: unknown): portLike is MessagePortLike {
-  if (!isObject(portLike)) {
-    return false;
-  }
-
-  return (
-    typeof portLike.postMessage === "function"
-    && typeof portLike.on === "function"
-    && typeof portLike.off === "function"
-  );
-}
-
 function isReadyMessage(msg: unknown): msg is ReadyMessage {
   return isObject(msg) && msg.type === "ready";
 }
@@ -71,10 +53,7 @@ function isSharedObjectCreatedMessage(msg: unknown): msg is SharedObjectCreatedM
   return isObject(msg) && msg.type === "shared-object-created" && isObject(msg.sharedObject);
 }
 
-function ensurePort(portLike: unknown): MessagePortLike {
-  if (isMessagePortLike(portLike)) {
-    return portLike;
-  }
+function ensurePort(): MessagePortLike {
   if (parentPort) return parentPort;
   throw new Error("No worker message port available");
 }
@@ -86,26 +65,23 @@ function send(port: MessageTarget, msg: RuntimeMessage): void {
 export default class SharedRuntime {
   private readonly mode: RuntimeMode;
   private readonly port: MessagePortLike | null;
-  private readonly name: string;
   private readonly sharedObjects: Map<string, SharedObject>;
   private readonly workers: Map<string, WorkerEntry>;
 
-  constructor(mode: RuntimeMode, port: MessagePortLike | null = null, name = "host") {
+  constructor(mode: RuntimeMode, port: MessagePortLike | null = null) {
     this.mode = mode;
     this.port = port;
-    this.name = name;
     this.sharedObjects = new Map();
     this.workers = new Map();
   }
 
-  static host(_self: unknown, _codecs: unknown): SharedRuntime {
+  static host(): SharedRuntime {
     return new SharedRuntime("host");
   }
 
-  static async worker(_self: unknown, _codecs: unknown): Promise<SharedRuntime> {
-    const port = ensurePort(_self);
-    const bootstrap = workerData as WorkerBootstrapData | undefined;
-    const runtime = new SharedRuntime("worker", port, bootstrap?.name ?? "worker");
+  static async worker(): Promise<SharedRuntime> {
+    const port = ensurePort();
+    const runtime = new SharedRuntime("worker", port);
     await runtime.waitForInit();
     return runtime;
   }
@@ -117,9 +93,7 @@ export default class SharedRuntime {
 
     const workerUrl = this.resolveWorkerUrl(workerPath);
 
-    const worker = new Worker(workerUrl, {
-      workerData: { name },
-    });
+    const worker = new Worker(workerUrl);
     const workerThreadId = worker.threadId;
 
     const ready = new Promise<void>((resolve, reject) => {
@@ -142,7 +116,6 @@ export default class SharedRuntime {
     this.workers.set(name, { worker, threadId: workerThreadId });
     send(worker, {
       type: "init",
-      name,
       sharedObjects: [...this.sharedObjects.values()].map((obj) => obj.descriptor()),
     });
 
@@ -185,7 +158,7 @@ export default class SharedRuntime {
           for (const descriptor of msg.sharedObjects) {
             this.sharedObjects.set(descriptor.id, SharedObject.fromDescriptor(descriptor));
           }
-          send(port, { type: "ready", name: this.name });
+          send(port, { type: "ready" });
           port.off("message", onMessage);
           resolve();
         }
@@ -226,14 +199,8 @@ export default class SharedRuntime {
   }
 
   private resolveWorkerUrl(workerPath: string): URL {
-    if (workerPath.startsWith("file://")) {
-      return new URL(workerPath);
-    }
-
-    if (path.isAbsolute(workerPath)) {
-      return pathToFileURL(workerPath);
-    }
-
+    if (workerPath.startsWith("file://")) return new URL(workerPath);
+    if (path.isAbsolute(workerPath)) return pathToFileURL(workerPath);
     return new URL(workerPath, import.meta.url);
   }
 }

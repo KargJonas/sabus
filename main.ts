@@ -1,13 +1,13 @@
 import SharedRuntime from "./shared-runtime.js";
 
-const rt = SharedRuntime.host(globalThis, null);
+const rt = SharedRuntime.host();
 
 rt.createSharedObject("counter", {
   byteLength: Int32Array.BYTES_PER_ELEMENT,
 });
 
-await rt.spawnWorker("./reader.worker.js", "reader-fast");
-await rt.spawnWorker("./reader.worker.js", "reader-slow");
+await rt.spawnWorker("./reader-fast.worker.js", "reader-fast");
+await rt.spawnWorker("./reader-slow.worker.js", "reader-slow");
 
 const counter = rt.openSharedObject("counter");
 

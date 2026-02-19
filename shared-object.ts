@@ -5,9 +5,8 @@ const CTRL_SEQ = 1;
 const CTRL_NEXT_TICKET = 2;
 const CTRL_SERVING_TICKET = 3;
 const CTRL_WRITE_OWNER_THREAD_ID = 4;
-const CTRL_WRITE_REENTRANCE_DEPTH = 5;
-const CTRL_FATAL_WRITE_OWNER_DIED = 6;
-const CTRL_WORDS = 7;
+const CTRL_FATAL_WRITE_OWNER_DIED = 5;
+const CTRL_WORDS = 6;
 
 const NO_OWNER_THREAD_ID = -1;
 
@@ -87,7 +86,6 @@ export class SharedObject {
     Atomics.store(obj.control, CTRL_NEXT_TICKET, 0);
     Atomics.store(obj.control, CTRL_SERVING_TICKET, 0);
     Atomics.store(obj.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
-    Atomics.store(obj.control, CTRL_WRITE_REENTRANCE_DEPTH, 0);
     Atomics.store(obj.control, CTRL_FATAL_WRITE_OWNER_DIED, 0);
     return obj;
   }
@@ -106,24 +104,11 @@ export class SharedObject {
     };
   }
 
-  writer(): SharedObjectWriter {
-    return new SharedObjectWriter(this);
-  }
-
-  reader(): SharedObjectReader {
-    return new SharedObjectReader(this);
-  }
-
   async requestWrite<TReturn>(cb: SharedObjectWriteCallback<TReturn>): Promise<TReturn> {
     this.throwIfFatalWriteState();
 
     if (Atomics.load(this.control, CTRL_WRITE_OWNER_THREAD_ID) === localThreadId) {
-      Atomics.add(this.control, CTRL_WRITE_REENTRANCE_DEPTH, 1);
-      try {
-        return await this.writeUnlocked(cb);
-      } finally {
-        this.releaseWriteLock();
-      }
+      throw new Error(`Reentrant writes are not supported for shared object "${this.id}"`);
     }
 
     const ticket = Atomics.add(this.control, CTRL_NEXT_TICKET, 1);
@@ -131,7 +116,6 @@ export class SharedObject {
     this.throwIfFatalWriteState();
 
     Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, localThreadId);
-    Atomics.store(this.control, CTRL_WRITE_REENTRANCE_DEPTH, 1);
     try {
       return await this.writeUnlocked(cb);
     } finally {
@@ -146,7 +130,6 @@ export class SharedObject {
 
     Atomics.store(this.control, CTRL_FATAL_WRITE_OWNER_DIED, 1);
     Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
-    Atomics.store(this.control, CTRL_WRITE_REENTRANCE_DEPTH, 0);
     Atomics.notify(this.control, CTRL_SERVING_TICKET);
     return true;
   }
@@ -215,17 +198,6 @@ export class SharedObject {
       );
     }
 
-    const currentDepth = Atomics.load(this.control, CTRL_WRITE_REENTRANCE_DEPTH);
-    if (currentDepth <= 0) {
-      throw new Error(`Invalid write lock depth ${currentDepth} on shared object "${this.id}"`);
-    }
-
-    const remainingDepth = currentDepth - 1;
-    Atomics.store(this.control, CTRL_WRITE_REENTRANCE_DEPTH, remainingDepth);
-    if (remainingDepth > 0) {
-      return;
-    }
-
     Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
     Atomics.add(this.control, CTRL_SERVING_TICKET, 1);
     Atomics.notify(this.control, CTRL_SERVING_TICKET, 1);
@@ -237,29 +209,5 @@ export class SharedObject {
         `Shared object "${this.id}" entered fatal state: a writer thread exited while holding the write lock`,
       );
     }
-  }
-}
-
-export class SharedObjectWriter {
-  private readonly obj: SharedObject;
-
-  constructor(obj: SharedObject) {
-    this.obj = obj;
-  }
-
-  async write<TReturn>(cb: SharedObjectWriteCallback<TReturn>): Promise<TReturn> {
-    return this.obj.requestWrite(cb);
-  }
-}
-
-export class SharedObjectReader {
-  private readonly obj: SharedObject;
-
-  constructor(obj: SharedObject) {
-    this.obj = obj;
-  }
-
-  readLatest(): SharedObjectReadSnapshot | null {
-    return this.obj.readLatest();
   }
 }

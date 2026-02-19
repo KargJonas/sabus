@@ -1,0 +1,19 @@
+{
+  "name": "flatbuffers-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gen": "PATH=\"./flatbuffers:./flatbuffers/build:../../build:../../flatbuffers/build:$PATH\" flatc --ts --gen-mutable -o generated schema/*.fbs",
+    "demo": "tsx demo.ts",
+    "demo:shared": "tsx demo-shared-object.ts",
+    "start": "npm run gen && npm run demo",
+    "start:shared": "npm run gen && npm run demo:shared"
+  },
+  "dependencies": {
+    "flatbuffers": "^24.3.25"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.4.5"
+  }
+}

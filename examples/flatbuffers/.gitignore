@@ -1,0 +1,4 @@
+node_modules/
+flatbuffers/
+schema/
+generated/

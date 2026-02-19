@@ -56,6 +56,7 @@ export class SharedObject {
   readonly dataSab: SharedArrayBuffer;
   readonly controlSab: SharedArrayBuffer;
   private readonly control: Int32Array;
+  private readonly notifyChannel: BroadcastChannel;
 
   constructor(descriptor: SharedObjectDescriptor) {
     this.id = descriptor.id;
@@ -64,6 +65,7 @@ export class SharedObject {
     this.dataSab = descriptor.dataSab;
     this.controlSab = descriptor.controlSab;
     this.control = new Int32Array(this.controlSab);
+    this.notifyChannel = new BroadcastChannel(`shared-object:${this.id}`);
   }
 
   static create(id: string, config: SharedObjectConfig): SharedObject {
@@ -147,7 +149,14 @@ export class SharedObject {
 
     Atomics.store(this.control, CTRL_PUBLISHED_SLOT, slotIndex);
     Atomics.store(this.control, CTRL_SEQ, nextSeq);
+    this.notifyChannel.postMessage(null);
     return result;
+  }
+
+  subscribe(callback: () => void): () => void {
+    const channel = new BroadcastChannel(`shared-object:${this.id}`);
+    channel.onmessage = callback;
+    return () => channel.close();
   }
 
   readLatest(): SharedObjectReadSnapshot | null {

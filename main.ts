@@ -8,6 +8,7 @@ rt.createSharedObject("counter", {
 
 await rt.spawnWorker("./reader-fast.worker.js", "reader-fast");
 await rt.spawnWorker("./reader-slow.worker.js", "reader-slow");
+await rt.spawnWorker("./reader-subscribed.worker.js", "reader-subscribed");
 
 const counter = rt.openSharedObject("counter");
 

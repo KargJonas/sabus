@@ -1,6 +1,15 @@
+import { threadId as localThreadId } from "node:worker_threads";
+
 const CTRL_PUBLISHED_SLOT = 0;
 const CTRL_SEQ = 1;
-const CTRL_WORDS = 2;
+const CTRL_NEXT_TICKET = 2;
+const CTRL_SERVING_TICKET = 3;
+const CTRL_WRITE_OWNER_THREAD_ID = 4;
+const CTRL_WRITE_REENTRANCE_DEPTH = 5;
+const CTRL_FATAL_WRITE_OWNER_DIED = 6;
+const CTRL_WORDS = 7;
+
+const NO_OWNER_THREAD_ID = -1;
 
 export interface SharedObjectConfig {
   byteLength: number;
@@ -21,7 +30,25 @@ export interface SharedObjectWriteContext {
 }
 
 export type SharedObjectReadSnapshot = SharedObjectWriteContext;
-export type SharedObjectWriteCallback = (ctx: SharedObjectWriteContext) => void;
+export type SharedObjectWriteCallback<TReturn = void> = (
+  ctx: SharedObjectWriteContext,
+) => TReturn | Promise<TReturn>;
+
+type WaitAsyncResultLike = {
+  async: boolean;
+  value: PromiseLike<string> | string;
+};
+
+type WaitAsyncFunction = (
+  typedArray: Int32Array,
+  index: number,
+  value: number,
+  timeout?: number,
+) => WaitAsyncResultLike;
+
+const atomicsWithWaitAsync = Atomics as unknown as {
+  waitAsync?: WaitAsyncFunction;
+};
 
 export class SharedObject {
   readonly id: string;
@@ -57,6 +84,11 @@ export class SharedObject {
     const obj = new SharedObject(descriptor);
     Atomics.store(obj.control, CTRL_PUBLISHED_SLOT, -1);
     Atomics.store(obj.control, CTRL_SEQ, 0);
+    Atomics.store(obj.control, CTRL_NEXT_TICKET, 0);
+    Atomics.store(obj.control, CTRL_SERVING_TICKET, 0);
+    Atomics.store(obj.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
+    Atomics.store(obj.control, CTRL_WRITE_REENTRANCE_DEPTH, 0);
+    Atomics.store(obj.control, CTRL_FATAL_WRITE_OWNER_DIED, 0);
     return obj;
   }
 
@@ -82,17 +114,57 @@ export class SharedObject {
     return new SharedObjectReader(this);
   }
 
-  write(cb: SharedObjectWriteCallback): void {
+  async requestWrite<TReturn>(cb: SharedObjectWriteCallback<TReturn>): Promise<TReturn> {
+    this.throwIfFatalWriteState();
+
+    if (Atomics.load(this.control, CTRL_WRITE_OWNER_THREAD_ID) === localThreadId) {
+      Atomics.add(this.control, CTRL_WRITE_REENTRANCE_DEPTH, 1);
+      try {
+        return await this.writeUnlocked(cb);
+      } finally {
+        this.releaseWriteLock();
+      }
+    }
+
+    const ticket = Atomics.add(this.control, CTRL_NEXT_TICKET, 1);
+    await this.waitForTurn(ticket);
+    this.throwIfFatalWriteState();
+
+    Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, localThreadId);
+    Atomics.store(this.control, CTRL_WRITE_REENTRANCE_DEPTH, 1);
+    try {
+      return await this.writeUnlocked(cb);
+    } finally {
+      this.releaseWriteLock();
+    }
+  }
+
+  markWriterThreadDied(deadThreadId: number): boolean {
+    if (Atomics.load(this.control, CTRL_WRITE_OWNER_THREAD_ID) !== deadThreadId) {
+      return false;
+    }
+
+    Atomics.store(this.control, CTRL_FATAL_WRITE_OWNER_DIED, 1);
+    Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
+    Atomics.store(this.control, CTRL_WRITE_REENTRANCE_DEPTH, 0);
+    Atomics.notify(this.control, CTRL_SERVING_TICKET);
+    return true;
+  }
+
+  private async writeUnlocked<TReturn>(
+    cb: SharedObjectWriteCallback<TReturn>,
+  ): Promise<TReturn> {
     const nextSeq = (Atomics.load(this.control, CTRL_SEQ) + 1) >>> 0;
     const slotIndex = nextSeq % this.slotCount;
     const offset = slotIndex * this.byteLength;
     const bytes = new Uint8Array(this.dataSab, offset, this.byteLength);
     const dataView = new DataView(this.dataSab, offset, this.byteLength);
 
-    cb({ bytes, dataView, seq: nextSeq });
+    const result = await cb({ bytes, dataView, seq: nextSeq });
 
     Atomics.store(this.control, CTRL_PUBLISHED_SLOT, slotIndex);
     Atomics.store(this.control, CTRL_SEQ, nextSeq);
+    return result;
   }
 
   readLatest(): SharedObjectReadSnapshot | null {
@@ -111,6 +183,61 @@ export class SharedObject {
     }
     return null;
   }
+
+  private async waitForTurn(ticket: number): Promise<void> {
+    for (;;) {
+      this.throwIfFatalWriteState();
+
+      const servingTicket = Atomics.load(this.control, CTRL_SERVING_TICKET);
+      if (servingTicket === ticket) {
+        return;
+      }
+
+      const waitAsync = atomicsWithWaitAsync.waitAsync;
+      if (typeof waitAsync === "function") {
+        const waitResult = waitAsync(this.control, CTRL_SERVING_TICKET, servingTicket);
+        if (typeof waitResult.value !== "string") {
+          await waitResult.value;
+        }
+        continue;
+      }
+
+      // Fallback path for runtimes without Atomics.waitAsync.
+      Atomics.wait(this.control, CTRL_SERVING_TICKET, servingTicket, 10);
+    }
+  }
+
+  private releaseWriteLock(): void {
+    const ownerThreadId = Atomics.load(this.control, CTRL_WRITE_OWNER_THREAD_ID);
+    if (ownerThreadId !== localThreadId) {
+      throw new Error(
+        `Thread ${localThreadId} attempted to release write lock owned by ${ownerThreadId}`,
+      );
+    }
+
+    const currentDepth = Atomics.load(this.control, CTRL_WRITE_REENTRANCE_DEPTH);
+    if (currentDepth <= 0) {
+      throw new Error(`Invalid write lock depth ${currentDepth} on shared object "${this.id}"`);
+    }
+
+    const remainingDepth = currentDepth - 1;
+    Atomics.store(this.control, CTRL_WRITE_REENTRANCE_DEPTH, remainingDepth);
+    if (remainingDepth > 0) {
+      return;
+    }
+
+    Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
+    Atomics.add(this.control, CTRL_SERVING_TICKET, 1);
+    Atomics.notify(this.control, CTRL_SERVING_TICKET, 1);
+  }
+
+  private throwIfFatalWriteState(): void {
+    if (Atomics.load(this.control, CTRL_FATAL_WRITE_OWNER_DIED) !== 0) {
+      throw new Error(
+        `Shared object "${this.id}" entered fatal state: a writer thread exited while holding the write lock`,
+      );
+    }
+  }
 }
 
 export class SharedObjectWriter {
@@ -120,8 +247,8 @@ export class SharedObjectWriter {
     this.obj = obj;
   }
 
-  write(cb: SharedObjectWriteCallback): void {
-    this.obj.write(cb);
+  async write<TReturn>(cb: SharedObjectWriteCallback<TReturn>): Promise<TReturn> {
+    return this.obj.requestWrite(cb);
   }
 }
 

@@ -38,6 +38,11 @@ interface MessageTarget {
   postMessage(message: RuntimeMessage): void;
 }
 
+interface WorkerEntry {
+  worker: Worker;
+  threadId: number;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -83,7 +88,7 @@ export default class SharedRuntime {
   private readonly port: MessagePortLike | null;
   private readonly name: string;
   private readonly sharedObjects: Map<string, SharedObject>;
-  private readonly workers: Map<string, Worker>;
+  private readonly workers: Map<string, WorkerEntry>;
 
   constructor(mode: RuntimeMode, port: MessagePortLike | null = null, name = "host") {
     this.mode = mode;
@@ -105,18 +110,17 @@ export default class SharedRuntime {
     return runtime;
   }
 
-  async spawnWorker(workerPath: string | URL, name: string): Promise<{ name: string }> {
+  async spawnWorker(workerPath: string, name: string): Promise<{ name: string }> {
     if (this.mode !== "host") {
       throw new Error("spawnWorker is only available on host runtime");
     }
 
-    const workerUrl = workerPath instanceof URL
-      ? workerPath
-      : pathToFileURL(path.resolve(process.cwd(), workerPath));
+    const workerUrl = this.resolveWorkerUrl(workerPath);
 
     const worker = new Worker(workerUrl, {
       workerData: { name },
     });
+    const workerThreadId = worker.threadId;
 
     const ready = new Promise<void>((resolve, reject) => {
       const onMessage = (msg: unknown): void => {
@@ -128,13 +132,14 @@ export default class SharedRuntime {
       worker.on("message", onMessage);
       worker.on("error", reject);
       worker.on("exit", (code) => {
+        this.handleWorkerExit(name, workerThreadId);
         if (code !== 0) {
           reject(new Error(`Worker "${name}" exited with code ${code}`));
         }
       });
     });
 
-    this.workers.set(name, worker);
+    this.workers.set(name, { worker, threadId: workerThreadId });
     send(worker, {
       type: "init",
       name,
@@ -154,8 +159,8 @@ export default class SharedRuntime {
     this.sharedObjects.set(id, obj);
 
     const descriptor = obj.descriptor();
-    for (const worker of this.workers.values()) {
-      send(worker, { type: "shared-object-created", sharedObject: descriptor });
+    for (const entry of this.workers.values()) {
+      send(entry.worker, { type: "shared-object-created", sharedObject: descriptor });
     }
     return obj;
   }
@@ -194,5 +199,41 @@ export default class SharedRuntime {
         this.sharedObjects.set(descriptor.id, SharedObject.fromDescriptor(descriptor));
       }
     });
+  }
+
+  private handleWorkerExit(name: string, deadThreadId: number): void {
+    const workerEntry = this.workers.get(name);
+    if (workerEntry?.threadId === deadThreadId) {
+      this.workers.delete(name);
+    }
+
+    const lockedObjectIds: string[] = [];
+    for (const obj of this.sharedObjects.values()) {
+      if (obj.markWriterThreadDied(deadThreadId)) {
+        lockedObjectIds.push(obj.id);
+      }
+    }
+
+    if (lockedObjectIds.length === 0) {
+      return;
+    }
+
+    const objectList = lockedObjectIds.map((id) => `"${id}"`).join(", ");
+    const message = `Worker "${name}" (thread ${deadThreadId}) exited while holding write lock(s) on ${objectList}`;
+    queueMicrotask(() => {
+      throw new Error(message);
+    });
+  }
+
+  private resolveWorkerUrl(workerPath: string): URL {
+    if (workerPath.startsWith("file://")) {
+      return new URL(workerPath);
+    }
+
+    if (path.isAbsolute(workerPath)) {
+      return pathToFileURL(workerPath);
+    }
+
+    return new URL(workerPath, import.meta.url);
   }
 }

@@ -19,12 +19,15 @@ export default {
     outDir: "dist",
     rollupOptions: {
       input: {
-        index: path.resolve(rootDir, "examples/index.html"),
-        "examples/reader-writer/index": path.resolve(
-          rootDir,
-          "examples/reader-writer/index.html",
-        ),
+        index: path.resolve(rootDir, "index.html"),
+        "examples/index": path.resolve(rootDir, "examples/index.html"),
         "examples/arrays/index": path.resolve(rootDir, "examples/arrays/index.html"),
+        "examples/multiple-readers/index": path.resolve(rootDir, "examples/multiple-readers/index.html"),
+        "examples/multiple-writers-lock/index": path.resolve(
+          rootDir,
+          "examples/multiple-writers-lock/index.html",
+        ),
+        "examples/nested-schema/index": path.resolve(rootDir, "examples/nested-schema/index.html"),
         "examples/webgl-canvas/index": path.resolve(rootDir, "examples/webgl-canvas/index.html"),
       },
     },

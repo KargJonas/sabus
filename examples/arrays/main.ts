@@ -1,38 +1,52 @@
 import SharedRuntime from "../../shared-runtime.js";
-import { ParticleSchema } from "./particle-schema.js";
+import { SensorFrameSchema } from "./sensor-frame-schema.js";
 
-const out = document.createElement("pre");
-out.style.font = "14px/1.4 monospace";
-out.style.margin = "16px";
-document.body.append(out);
-
-const log = (line: string): void => {
-  out.textContent += `${line}\n`;
+const log = (text: string): void => {
+  document.body.innerHTML += `${text}<br>`;
 };
 
-const rt = SharedRuntime.host();
-const particle = rt.createSharedObject("particle", ParticleSchema);
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const { worker } = await rt.spawnWorker(new URL("./reader.worker.js", import.meta.url).href, "reader");
-worker.addEventListener("message", (event: MessageEvent<unknown>) => {
+// Set everything up:
+//  - Create shared runtime
+//  - Create shared object based on schema definition
+//  - Spawn a worker that reads the shared arrays
+const rt = SharedRuntime.host();
+const frame = rt.createSharedObject("sensor-frame", SensorFrameSchema);
+const reader = await rt.spawnWorker(new URL("./reader.worker.js", import.meta.url).href, "reader");
+
+reader.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (typeof event.data === "string") {
     log(event.data);
   }
 });
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+log("[setup] writing 8 Float32 samples + 8 Uint8 flags");
+log("[setup] reader receives updates via subscribe()");
+log("[setup] demo runs continuously");
+log("");
 
-for (let t = 0; t < 30; t += 1) {
-  const dt = t * 0.1;
-  const px = Math.sin(dt);
-  const py = Math.cos(dt);
+for (let tick = 0; ; tick += 1) {
+  const phase = tick * 0.2;
+  const samples = new Float32Array(8);
 
-  await particle.write({
-    position: { x: px, y: py, z: dt },
-    velocity: { x: Math.cos(dt), y: -Math.sin(dt), z: 1 },
-    mass: 1.5,
+  for (let i = 0; i < samples.length; i += 1) {
+    samples[i] = Math.sin(phase + i * 0.35) * 10;
+  }
+
+  const flags = Array.from({ length: 8 }, (_, i) => ((tick + i) % 3 === 0 ? 1 : 0));
+  const gain = 0.8 + 0.2 * Math.sin(phase * 0.5);
+
+  await frame.write({
+    samples,
+    flags,
+    gain,
   });
 
-  log(`[writer] t=${t} pos=[${px.toFixed(2)}, ${py.toFixed(2)}, ${dt.toFixed(2)}]`);
-  await sleep(100);
+  log(
+    `[writer] tick=${tick} samples=[${samples[0].toFixed(2)}, ${samples[1].toFixed(2)}, ${samples[2].toFixed(2)}, ...]` +
+      ` flags=[${flags.join(",")}] gain=${gain.toFixed(2)}`,
+  );
+
+  await sleep(120);
 }

@@ -15,6 +15,7 @@ type RuntimeMode = "host" | "worker";
 interface InitMessage {
   type: "init";
   sharedObjects: SharedObjectDescriptor[];
+  setupData?: unknown;
 }
 
 interface ReadyMessage {
@@ -87,12 +88,14 @@ export default class SharedRuntime {
   private readonly port: MessagePortLike | null;
   private readonly sharedObjects: Map<string, SharedObject>;
   private readonly workers: Map<string, WorkerEntry>;
+  private workerSetupData: unknown;
 
   constructor(mode: RuntimeMode, port: MessagePortLike | null = null) {
     this.mode = mode;
     this.port = port;
     this.sharedObjects = new Map();
     this.workers = new Map();
+    this.workerSetupData = undefined;
   }
 
   static host(): SharedRuntime {
@@ -106,7 +109,7 @@ export default class SharedRuntime {
     return runtime;
   }
 
-  async spawnWorker(workerPath: string, name: string): Promise<{ name: string; worker: Worker }> {
+  async spawnWorker(workerPath: string, name: string, setupData?: unknown): Promise<Worker> {
     if (this.mode !== "host") {
       throw new Error("spawnWorker is only available on host runtime");
     }
@@ -140,10 +143,11 @@ export default class SharedRuntime {
     send(worker, {
       type: "init",
       sharedObjects: [...this.sharedObjects.values()].map((obj) => obj.descriptor()),
+      setupData,
     });
 
     await ready;
-    return { name, worker };
+    return worker;
   }
 
   createSharedObject(id: string, config: SharedObjectConfig): SharedObject;
@@ -185,6 +189,10 @@ export default class SharedRuntime {
     return schema ? new TypedSharedObject(obj, schema) : obj;
   }
 
+  getWorkerSetupData<TSetup = unknown>(): TSetup | undefined {
+    return this.workerSetupData as TSetup | undefined;
+  }
+
   private async waitForInit(): Promise<void> {
     const port = this.port;
     if (!port) {
@@ -200,6 +208,7 @@ export default class SharedRuntime {
         for (const descriptor of msg.sharedObjects) {
           this.sharedObjects.set(descriptor.id, SharedObject.fromDescriptor(descriptor));
         }
+        this.workerSetupData = msg.setupData;
 
         send(port, { type: "ready" });
         stop();

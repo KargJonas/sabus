@@ -8,10 +8,9 @@ particle.subscribe(() => {
   const snap = particle.read();
   if (!snap) return;
 
-  const pos = snap.position; // Float32Array(3)
-  const vel = snap.velocity; // Float32Array(3)
+  const { position: pos, velocity: vel } = snap;
   console.log(
-    `[reader] seq=${snap.seq} pos=[${pos[0].toFixed(2)}, ${pos[1].toFixed(2)}, ${pos[2].toFixed(2)}]` +
-      ` vel=[${vel[0].toFixed(2)}, ${vel[1].toFixed(2)}, ${vel[2].toFixed(2)}] mass=${snap.mass}`,
+    `[reader] seq=${snap.seq} pos=[${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)}]` +
+      ` vel=[${vel.x.toFixed(2)}, ${vel.y.toFixed(2)}, ${vel.z.toFixed(2)}] mass=${snap.mass}`,
   );
 });

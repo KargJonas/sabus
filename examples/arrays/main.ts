@@ -18,8 +18,8 @@ while (t < maxSteps) {
   const pz = t * dt;
 
   await particle.write({
-    position: [px, py, pz],
-    velocity: [Math.cos(t * dt), -Math.sin(t * dt), 1.0],
+    position: { x: px, y: py, z: pz },
+    velocity: { x: Math.cos(t * dt), y: -Math.sin(t * dt), z: 1.0 },
     mass: 1.5,
   });
 

@@ -91,53 +91,91 @@ const TYPE_ARRAY_CTOR: Record<Type, TypedArrayConstructorFor<Type>> = {
 };
 
 /**
- * A schema field is either a scalar type or a fixed-length array tuple.
- * e.g. Type.Int32 or [Type.Float32, 3]
- */
-export type FieldType = Type | readonly [Type, number];
-
-/**
  * A schema definition is a plain object mapping field names to field types.
  * Must be declared `as const` to preserve literal types for type inference.
- * e.g. { health: Type.Int32, position: [Type.Float32, 3] } as const
+ * Uses an interface to allow recursive (nested) schemas without circular alias errors.
+ * e.g. { health: Type.Int32, position: [Type.Float32, 3], transform: { x: Type.Float32 } }
  */
-export type SchemaDefinition = Record<string, FieldType>;
+export interface SchemaDefinition {
+  readonly [key: string]: Type | readonly [Type, number] | SchemaDefinition;
+}
 
 /**
  * Derives the JS read types from a schema. Scalar fields become `number`,
- * array fields become the corresponding TypedArray (e.g. Float32Array).
- * This is the return type of TypedSharedObject.read().
+ * array fields become the corresponding TypedArray (e.g. Float32Array),
+ * and nested schema fields become a nested SchemaValues object.
  */
 export type SchemaValues<S extends SchemaDefinition> = {
   [K in keyof S]: S[K] extends readonly [infer T extends Type, number]
   ? TypedArrayFor<T>
+  : S[K] extends SchemaDefinition
+  ? SchemaValues<S[K]>
   : number;
 };
 
 /**
  * Derives the JS write types from a schema. Same as SchemaValues, except
- * array fields also accept ArrayLike<number> for ergonomics (e.g. plain [1, 2, 3]).
+ * array fields also accept ArrayLike<number> for ergonomics (e.g. plain [1, 2, 3]),
+ * and nested schema fields accept partial values at every level.
  */
 export type SchemaWriteValues<S extends SchemaDefinition> = {
   [K in keyof S]: S[K] extends readonly [infer T extends Type, number]
   ? TypedArrayFor<T> | ArrayLike<number>
+  : S[K] extends SchemaDefinition
+  ? Partial<SchemaWriteValues<S[K]>>
   : number;
 };
 
-interface FieldLayout {
+interface ScalarFieldLayout {
+  kind: "scalar";
+  type: Type;
+  offset: number;
+}
+
+interface ArrayFieldLayout {
+  kind: "array";
   type: Type;
   offset: number;
   count: number;
 }
+
+interface NestedFieldLayout {
+  kind: "nested";
+  offset: number;
+  layout: Layout<SchemaDefinition>;
+}
+
+type FieldLayout = ScalarFieldLayout | ArrayFieldLayout | NestedFieldLayout;
 
 export interface Layout<S extends SchemaDefinition> {
   fields: { [K in keyof S]: FieldLayout };
   byteLength: number;
 }
 
+function isNestedSchema(raw: SchemaDefinition[string]): raw is SchemaDefinition {
+  return typeof raw === "object" && !Array.isArray(raw);
+}
+
+/**
+ * Returns the maximum element alignment required by any field in a schema.
+ */
+function maxAlignment(schema: SchemaDefinition): number {
+  let align = 1;
+  for (const raw of Object.values(schema)) {
+    if (isNestedSchema(raw)) {
+      align = Math.max(align, maxAlignment(raw));
+    } else {
+      const type = typeof raw === "number" ? raw : raw[0];
+      align = Math.max(align, TYPE_SIZE[type]);
+    }
+  }
+  return align;
+}
+
 /**
  * Walks a schema and computes the byte offset of each field, respecting natural
- * alignment (each field aligned to its element size). Called once at creation time.
+ * alignment (each field aligned to its element size). Recurses into nested schemas.
+ * Called once at creation time.
  */
 export function computeLayout<S extends SchemaDefinition>(schema: S): Layout<S> {
   let offset = 0;
@@ -145,12 +183,25 @@ export function computeLayout<S extends SchemaDefinition>(schema: S): Layout<S> 
 
   for (const key of Object.keys(schema) as (keyof S & string)[]) {
     const raw = schema[key];
-    const type = typeof raw === "number" ? raw : raw[0];
-    const count = typeof raw === "number" ? 1 : raw[1];
-    const elemSize = TYPE_SIZE[type];
-    offset = Math.ceil(offset / elemSize) * elemSize;
-    fields[key] = { type, offset, count };
-    offset += elemSize * count;
+
+    if (isNestedSchema(raw)) {
+      const nested = computeLayout(raw);
+      const align = maxAlignment(raw);
+      offset = Math.ceil(offset / align) * align;
+      fields[key] = { kind: "nested", offset, layout: nested };
+      offset += nested.byteLength;
+    } else {
+      const type = typeof raw === "number" ? raw : raw[0];
+      const count = typeof raw === "number" ? 1 : raw[1];
+      const elemSize = TYPE_SIZE[type];
+      offset = Math.ceil(offset / elemSize) * elemSize;
+      if (count === 1) {
+        fields[key] = { kind: "scalar", type, offset };
+      } else {
+        fields[key] = { kind: "array", type, offset, count };
+      }
+      offset += elemSize * count;
+    }
   }
 
   return { fields, byteLength: offset };
@@ -159,21 +210,32 @@ export function computeLayout<S extends SchemaDefinition>(schema: S): Layout<S> 
 /**
  * Reads all fields from a DataView into a plain object according to the layout.
  * Scalar fields use a single DataView getter call. Array fields return a TypedArray
- * view directly into the underlying buffer (no copy).
+ * view directly into the underlying buffer (no copy). Nested fields recurse.
  */
 export function readSnapshot<S extends SchemaDefinition>(
   layout: Layout<S>,
   dataView: DataView,
+  baseOffset = 0,
 ): SchemaValues<S> {
   const out = {} as Record<string, unknown>;
   for (const key of Object.keys(layout.fields) as (keyof S & string)[]) {
     const field = layout.fields[key];
-    if (field.count === 1) {
-      const getter = TYPE_GETTER[field.type] as keyof DataView;
-      out[key] = (dataView[getter] as Function).call(dataView, field.offset, true);
-    } else {
-      const Ctor = TYPE_ARRAY_CTOR[field.type];
-      out[key] = new Ctor(dataView.buffer, dataView.byteOffset + field.offset, field.count);
+    const abs = baseOffset + field.offset;
+    switch (field.kind) {
+      case "scalar": {
+        const getter = TYPE_GETTER[field.type] as keyof DataView;
+        out[key] = (dataView[getter] as Function).call(dataView, abs, true);
+        break;
+      }
+      case "array": {
+        const Ctor = TYPE_ARRAY_CTOR[field.type];
+        out[key] = new Ctor(dataView.buffer, dataView.byteOffset + abs, field.count);
+        break;
+      }
+      case "nested": {
+        out[key] = readSnapshot(field.layout, dataView, abs);
+        break;
+      }
     }
   }
   return out as SchemaValues<S>;
@@ -182,30 +244,46 @@ export function readSnapshot<S extends SchemaDefinition>(
 /**
  * Writes a partial set of fields into a DataView according to the layout.
  * Scalar fields use a single DataView setter call. Array fields iterate
- * and write each element individually.
+ * and write each element individually. Nested fields recurse.
  */
 export function writeFields<S extends SchemaDefinition>(
   layout: Layout<S>,
   dataView: DataView,
   values: Partial<SchemaWriteValues<S>>,
+  baseOffset = 0,
 ): void {
   for (const key of Object.keys(values) as (keyof S & string)[]) {
     const field = layout.fields[key];
     const val = values[key];
-    if (field.count === 1) {
-      const setter = TYPE_SETTER[field.type] as keyof DataView;
-      (dataView[setter] as Function).call(dataView, field.offset, val, true);
-    } else {
-      const src = val as ArrayLike<number>;
-      const setter = TYPE_SETTER[field.type] as keyof DataView;
-      const elemSize = TYPE_SIZE[field.type];
-      for (let i = 0; i < field.count; i++) {
-        (dataView[setter] as Function).call(
+    const abs = baseOffset + field.offset;
+    switch (field.kind) {
+      case "scalar": {
+        const setter = TYPE_SETTER[field.type] as keyof DataView;
+        (dataView[setter] as Function).call(dataView, abs, val, true);
+        break;
+      }
+      case "array": {
+        const src = val as ArrayLike<number>;
+        const setter = TYPE_SETTER[field.type] as keyof DataView;
+        const elemSize = TYPE_SIZE[field.type];
+        for (let i = 0; i < field.count; i++) {
+          (dataView[setter] as Function).call(
+            dataView,
+            abs + i * elemSize,
+            src[i],
+            true,
+          );
+        }
+        break;
+      }
+      case "nested": {
+        writeFields(
+          field.layout,
           dataView,
-          field.offset + i * elemSize,
-          src[i],
-          true,
+          val as Partial<SchemaWriteValues<SchemaDefinition>>,
+          abs,
         );
+        break;
       }
     }
   }

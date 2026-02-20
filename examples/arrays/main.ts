@@ -1,31 +1,38 @@
 import SharedRuntime from "../../shared-runtime.js";
 import { ParticleSchema } from "./particle-schema.js";
 
+const out = document.createElement("pre");
+out.style.font = "14px/1.4 monospace";
+out.style.margin = "16px";
+document.body.append(out);
+
+const log = (line: string): void => {
+  out.textContent += `${line}\n`;
+};
+
 const rt = SharedRuntime.host();
 const particle = rt.createSharedObject("particle", ParticleSchema);
 
-await rt.spawnWorker(new URL("./reader.worker.js", import.meta.url).href, "reader");
+const { worker } = await rt.spawnWorker(new URL("./reader.worker.js", import.meta.url).href, "reader");
+worker.addEventListener("message", (event: MessageEvent<unknown>) => {
+  if (typeof event.data === "string") {
+    log(event.data);
+  }
+});
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-let t = 0;
-const dt = 0.1;
-const maxSteps = 30;
-
-while (t < maxSteps) {
-  const px = Math.sin(t * dt);
-  const py = Math.cos(t * dt);
-  const pz = t * dt;
+for (let t = 0; t < 30; t += 1) {
+  const dt = t * 0.1;
+  const px = Math.sin(dt);
+  const py = Math.cos(dt);
 
   await particle.write({
-    position: { x: px, y: py, z: pz },
-    velocity: { x: Math.cos(t * dt), y: -Math.sin(t * dt), z: 1.0 },
+    position: { x: px, y: py, z: dt },
+    velocity: { x: Math.cos(dt), y: -Math.sin(dt), z: 1 },
     mass: 1.5,
   });
 
-  console.log(`[writer] t=${t} pos=[${px.toFixed(2)}, ${py.toFixed(2)}, ${pz.toFixed(2)}]`);
-  t += 1;
+  log(`[writer] t=${t} pos=[${px.toFixed(2)}, ${py.toFixed(2)}, ${dt.toFixed(2)}]`);
   await sleep(100);
 }
-
-setTimeout(() => process.exit(0), 1200);

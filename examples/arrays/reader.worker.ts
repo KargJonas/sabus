@@ -9,7 +9,7 @@ particle.subscribe(() => {
   if (!snap) return;
 
   const { position: pos, velocity: vel } = snap;
-  console.log(
+  self.postMessage(
     `[reader] seq=${snap.seq} pos=[${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)}]` +
       ` vel=[${vel.x.toFixed(2)}, ${vel.y.toFixed(2)}, ${vel.z.toFixed(2)}] mass=${snap.mass}`,
   );

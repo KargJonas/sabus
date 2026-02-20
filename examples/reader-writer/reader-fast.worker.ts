@@ -10,5 +10,5 @@ const threadName = "worker-fast";
 setInterval(() => {
   const latest = counter.read();
   if (!latest) return;
-  console.log(`[${threadName}] seq=${latest.seq} value=${latest.value}`);
+  self.postMessage(`[${threadName}] seq=${latest.seq} value=${latest.value}`);
 }, pollMs);

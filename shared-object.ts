@@ -6,7 +6,6 @@
  * SharedObject with a schema to provide typed read/write access.
  */
 
-import { threadId as localThreadId } from "node:worker_threads";
 import {
   computeLayout,
   readSnapshot,
@@ -17,13 +16,14 @@ import {
   type SchemaWriteValues,
 } from "./schema.js";
 
+const localThreadId = (crypto.getRandomValues(new Uint32Array(1))[0]! & 0x7fffffff) || 1;
+
 const CTRL_PUBLISHED_SLOT = 0;
 const CTRL_SEQ = 1;
 const CTRL_NEXT_TICKET = 2;
 const CTRL_SERVING_TICKET = 3;
 const CTRL_WRITE_OWNER_THREAD_ID = 4;
-const CTRL_FATAL_WRITE_OWNER_DIED = 5;
-const CTRL_WORDS = 6;
+const CTRL_WORDS = 5;
 
 const NO_OWNER_THREAD_ID = -1;
 
@@ -105,7 +105,6 @@ export class SharedObject {
     Atomics.store(obj.control, CTRL_NEXT_TICKET, 0);
     Atomics.store(obj.control, CTRL_SERVING_TICKET, 0);
     Atomics.store(obj.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
-    Atomics.store(obj.control, CTRL_FATAL_WRITE_OWNER_DIED, 0);
     return obj;
   }
 
@@ -124,15 +123,12 @@ export class SharedObject {
   }
 
   async requestWrite<TReturn>(cb: SharedObjectWriteCallback<TReturn>): Promise<TReturn> {
-    this.throwIfFatalWriteState();
-
     if (Atomics.load(this.control, CTRL_WRITE_OWNER_THREAD_ID) === localThreadId) {
       throw new Error(`Reentrant writes are not supported for shared object "${this.id}"`);
     }
 
     const ticket = Atomics.add(this.control, CTRL_NEXT_TICKET, 1);
     await this.waitForTurn(ticket);
-    this.throwIfFatalWriteState();
 
     Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, localThreadId);
     try {
@@ -140,17 +136,6 @@ export class SharedObject {
     } finally {
       this.releaseWriteLock();
     }
-  }
-
-  markWriterThreadDied(deadThreadId: number): boolean {
-    if (Atomics.load(this.control, CTRL_WRITE_OWNER_THREAD_ID) !== deadThreadId) {
-      return false;
-    }
-
-    Atomics.store(this.control, CTRL_FATAL_WRITE_OWNER_DIED, 1);
-    Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
-    Atomics.notify(this.control, CTRL_SERVING_TICKET);
-    return true;
   }
 
   private async writeUnlocked<TReturn>(
@@ -195,8 +180,6 @@ export class SharedObject {
 
   private async waitForTurn(ticket: number): Promise<void> {
     for (; ;) {
-      this.throwIfFatalWriteState();
-
       const servingTicket = Atomics.load(this.control, CTRL_SERVING_TICKET);
       if (servingTicket === ticket) {
         return;
@@ -212,7 +195,7 @@ export class SharedObject {
       }
 
       // Fallback path for runtimes without Atomics.waitAsync.
-      Atomics.wait(this.control, CTRL_SERVING_TICKET, servingTicket, 10);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
     }
   }
 
@@ -227,14 +210,6 @@ export class SharedObject {
     Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
     Atomics.add(this.control, CTRL_SERVING_TICKET, 1);
     Atomics.notify(this.control, CTRL_SERVING_TICKET, 1);
-  }
-
-  private throwIfFatalWriteState(): void {
-    if (Atomics.load(this.control, CTRL_FATAL_WRITE_OWNER_DIED) !== 0) {
-      throw new Error(
-        `Shared object "${this.id}" entered fatal state: a writer thread exited while holding the write lock`,
-      );
-    }
   }
 }
 

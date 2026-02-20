@@ -3,13 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "example:reader-writer": "npm run build && node dist/examples/reader-writer/main.js",
-    "example:arrays": "npm run build && node dist/examples/arrays/main.js",
+    "build": "vite build",
+    "dev": "vite --host 0.0.0.0 --port 3000 --strictPort",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^22.13.10",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vite": "^7.1.5"
   }
 }

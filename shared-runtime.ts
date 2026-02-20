@@ -1,14 +1,11 @@
 /**
- * SharedRuntime: orchestrates multi-threaded shared memory communication.
+ * SharedRuntime: orchestrates shared memory communication between browser workers.
  *
  * In host mode, spawns workers and manages SharedObject creation/distribution.
  * In worker mode, receives SharedObject descriptors from the host and provides
- * access to them. Handles worker lifecycle and dead-writer detection.
+ * access to them.
  */
 
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { Worker, parentPort } from "node:worker_threads";
 import { SharedObject, TypedSharedObject } from "./shared-object.js";
 import type { SharedObjectConfig, SharedObjectDescriptor } from "./shared-object.js";
 import { computeLayout, type SchemaDefinition } from "./schema.js";
@@ -33,8 +30,7 @@ type RuntimeMessage = InitMessage | ReadyMessage | SharedObjectCreatedMessage;
 
 interface MessagePortLike {
   postMessage(message: RuntimeMessage): void;
-  on(event: "message", listener: (message: unknown) => void): this;
-  off(event: "message", listener: (message: unknown) => void): this;
+  addMessageListener(listener: (message: unknown) => void): () => void;
 }
 
 interface MessageTarget {
@@ -63,8 +59,23 @@ function isSharedObjectCreatedMessage(msg: unknown): msg is SharedObjectCreatedM
 }
 
 function ensurePort(): MessagePortLike {
-  if (parentPort) return parentPort;
-  throw new Error("No worker message port available");
+  if (typeof document !== "undefined") {
+    throw new Error("No worker message port available");
+  }
+
+  const scope = globalThis as unknown as DedicatedWorkerGlobalScope;
+  return {
+    postMessage(message: RuntimeMessage): void {
+      scope.postMessage(message);
+    },
+    addMessageListener(listener: (message: unknown) => void): () => void {
+      const onMessage = (event: MessageEvent<unknown>): void => {
+        listener(event.data);
+      };
+      scope.addEventListener("message", onMessage);
+      return () => scope.removeEventListener("message", onMessage);
+    },
+  };
 }
 
 function send(port: MessageTarget, msg: RuntimeMessage): void {
@@ -95,31 +106,34 @@ export default class SharedRuntime {
     return runtime;
   }
 
-  async spawnWorker(workerPath: string, name: string): Promise<{ name: string }> {
+  async spawnWorker(workerPath: string, name: string): Promise<{ name: string; worker: Worker }> {
     if (this.mode !== "host") {
       throw new Error("spawnWorker is only available on host runtime");
     }
 
     const workerUrl = this.resolveWorkerUrl(workerPath);
-
-    const worker = new Worker(workerUrl);
-    const workerThreadId = worker.threadId;
+    const worker = new Worker(workerUrl, { type: "module" });
+    const workerThreadId = (crypto.getRandomValues(new Uint32Array(1))[0]! & 0x7fffffff) || 1;
 
     const ready = new Promise<void>((resolve, reject) => {
-      const onMessage = (msg: unknown): void => {
-        if (isReadyMessage(msg)) {
-          worker.off("message", onMessage);
-          resolve();
+      const onMessage = (event: MessageEvent<unknown>): void => {
+        if (!isReadyMessage(event.data)) {
+          return;
         }
+
+        worker.removeEventListener("message", onMessage);
+        worker.removeEventListener("error", onError);
+        resolve();
       };
-      worker.on("message", onMessage);
-      worker.on("error", reject);
-      worker.on("exit", (code) => {
-        this.handleWorkerExit(name, workerThreadId);
-        if (code !== 0) {
-          reject(new Error(`Worker "${name}" exited with code ${code}`));
-        }
-      });
+
+      const onError = (event: ErrorEvent): void => {
+        worker.removeEventListener("message", onMessage);
+        worker.removeEventListener("error", onError);
+        reject(event.error instanceof Error ? event.error : new Error(event.message));
+      };
+
+      worker.addEventListener("message", onMessage);
+      worker.addEventListener("error", onError);
     });
 
     this.workers.set(name, { worker, threadId: workerThreadId });
@@ -129,7 +143,7 @@ export default class SharedRuntime {
     });
 
     await ready;
-    return { name };
+    return { name, worker };
   }
 
   createSharedObject(id: string, config: SharedObjectConfig): SharedObject;
@@ -178,54 +192,32 @@ export default class SharedRuntime {
     }
 
     await new Promise<void>((resolve) => {
-      const onMessage = (msg: unknown): void => {
-        if (isInitMessage(msg)) {
-          for (const descriptor of msg.sharedObjects) {
-            this.sharedObjects.set(descriptor.id, SharedObject.fromDescriptor(descriptor));
-          }
-          send(port, { type: "ready" });
-          port.off("message", onMessage);
-          resolve();
+      const stop = port.addMessageListener((msg: unknown): void => {
+        if (!isInitMessage(msg)) {
+          return;
         }
-      };
-      port.on("message", onMessage);
+
+        for (const descriptor of msg.sharedObjects) {
+          this.sharedObjects.set(descriptor.id, SharedObject.fromDescriptor(descriptor));
+        }
+
+        send(port, { type: "ready" });
+        stop();
+        resolve();
+      });
     });
 
-    port.on("message", (msg: unknown) => {
-      if (isSharedObjectCreatedMessage(msg)) {
-        const descriptor = msg.sharedObject;
-        this.sharedObjects.set(descriptor.id, SharedObject.fromDescriptor(descriptor));
+    port.addMessageListener((msg: unknown): void => {
+      if (!isSharedObjectCreatedMessage(msg)) {
+        return;
       }
-    });
-  }
 
-  private handleWorkerExit(name: string, deadThreadId: number): void {
-    const workerEntry = this.workers.get(name);
-    if (workerEntry?.threadId === deadThreadId) {
-      this.workers.delete(name);
-    }
-
-    const lockedObjectIds: string[] = [];
-    for (const obj of this.sharedObjects.values()) {
-      if (obj.markWriterThreadDied(deadThreadId)) {
-        lockedObjectIds.push(obj.id);
-      }
-    }
-
-    if (lockedObjectIds.length === 0) {
-      return;
-    }
-
-    const objectList = lockedObjectIds.map((id) => `"${id}"`).join(", ");
-    const message = `Worker "${name}" (thread ${deadThreadId}) exited while holding write lock(s) on ${objectList}`;
-    queueMicrotask(() => {
-      throw new Error(message);
+      const descriptor = msg.sharedObject;
+      this.sharedObjects.set(descriptor.id, SharedObject.fromDescriptor(descriptor));
     });
   }
 
   private resolveWorkerUrl(workerPath: string): URL {
-    if (workerPath.startsWith("file://")) return new URL(workerPath);
-    if (path.isAbsolute(workerPath)) return pathToFileURL(workerPath);
     return new URL(workerPath, import.meta.url);
   }
 }

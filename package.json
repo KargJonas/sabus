@@ -5,7 +5,9 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --host 0.0.0.0 --port 3000 --strictPort",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:build": "tsc -p tsconfig.test.json",
+    "test": "npm run test:build && node --test test/*.test.mjs"
   },
   "devDependencies": {
     "typescript": "^5.4.5",

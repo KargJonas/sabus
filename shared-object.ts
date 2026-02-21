@@ -50,6 +50,16 @@ export type SharedObjectWriteCallback<TReturn = void> = (
   ctx: SharedObjectWriteContext,
 ) => TReturn | Promise<TReturn>;
 
+export interface TypedSharedObjectWriteContext<S extends SchemaDefinition>
+  extends SharedObjectWriteContext {
+  view: SchemaValues<S>;
+  set(values: Partial<SchemaWriteValues<S>>): void;
+}
+
+export type TypedSharedObjectWriteCallback<S extends SchemaDefinition, TReturn = void> = (
+  ctx: TypedSharedObjectWriteContext<S>,
+) => TReturn | Promise<TReturn>;
+
 type WaitAsyncResultLike = {
   async: boolean;
   value: PromiseLike<string> | string;
@@ -209,6 +219,19 @@ export class TypedSharedObject<S extends SchemaDefinition> {
   constructor(inner: SharedObject, schema: S) {
     this.inner = inner;
     this.layout = computeLayout(schema);
+  }
+
+  async requestWrite<TReturn>(cb: TypedSharedObjectWriteCallback<S, TReturn>): Promise<TReturn> {
+    return this.inner.requestWrite((ctx) => {
+      const set = (values: Partial<SchemaWriteValues<S>>): void => {
+        writeFields(this.layout, ctx.dataView, values);
+      };
+      return cb({
+        ...ctx,
+        view: readSnapshot(this.layout, ctx.dataView),
+        set,
+      });
+    });
   }
 
   async write(values: Partial<SchemaWriteValues<S>>): Promise<void> {

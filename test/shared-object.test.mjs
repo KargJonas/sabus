@@ -129,6 +129,7 @@ test("SharedObject subscription receives write notifications", async (t) => {
 test("TypedSharedObject writes and reads schema values", async (t) => {
   const schema = {
     count: Type.Int32,
+    label: [Type.Utf8, 12],
     vector: [Type.Uint16, 3],
     meta: {
       active: Type.Uint8,
@@ -144,7 +145,8 @@ test("TypedSharedObject writes and reads schema values", async (t) => {
 
   await typed.write({
     count: 4,
-    vector: [10, 20, 30],
+    label: "sensor-a",
+    vector: new Uint16Array([10, 20, 30]),
     meta: {
       active: 1,
       temperature: 19.5,
@@ -154,13 +156,15 @@ test("TypedSharedObject writes and reads schema values", async (t) => {
   const first = typed.read();
   assert.ok(first);
   assert.equal(first.count, 4);
+  assert.equal(first.label, "sensor-a");
   assert.deepEqual(Array.from(first.vector), [10, 20, 30]);
   assert.equal(first.meta.active, 1);
   assert.equal(first.meta.temperature, 19.5);
 
   await typed.write({
     count: 9,
-    vector: [11, 21, 31],
+    label: "s2",
+    vector: new Uint16Array([11, 21, 31]),
     meta: {
       active: 0,
       temperature: 21.25,
@@ -170,7 +174,43 @@ test("TypedSharedObject writes and reads schema values", async (t) => {
   const second = typed.read();
   assert.ok(second);
   assert.equal(second.count, 9);
+  assert.equal(second.label, "s2");
   assert.deepEqual(Array.from(second.vector), [11, 21, 31]);
   assert.equal(second.meta.active, 0);
   assert.equal(second.meta.temperature, 21.25);
+});
+
+test("TypedSharedObject requestWrite exposes direct typed views", async (t) => {
+  const schema = {
+    width: Type.Uint32,
+    height: Type.Uint32,
+    feed: [Type.Rgba8, 4],
+  };
+
+  const byteLength = computeLayout(schema).byteLength;
+  const obj = createSharedObject(byteLength);
+  t.after(() => cleanupSharedObject(obj));
+
+  const typed = new TypedSharedObject(obj, schema);
+
+  await typed.requestWrite(({ view, set }) => {
+    set({ width: 2, height: 2 });
+    view.feed.set([
+      255, 0, 0, 255,
+      0, 255, 0, 255,
+      0, 0, 255, 255,
+      255, 255, 255, 255,
+    ]);
+  });
+
+  const snap = typed.read();
+  assert.ok(snap);
+  assert.equal(snap.width, 2);
+  assert.equal(snap.height, 2);
+  assert.deepEqual(Array.from(snap.feed), [
+    255, 0, 0, 255,
+    0, 255, 0, 255,
+    0, 0, 255, 255,
+    255, 255, 255, 255,
+  ]);
 });

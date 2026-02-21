@@ -1,7 +1,5 @@
 import SharedRuntime from "../../shared-runtime.js";
-
-const FRAME_WIDTH = 320;
-const FRAME_HEIGHT = 180;
+import { FRAME_HEIGHT, FRAME_WIDTH, VideoSchema } from "./video-schema.js";
 
 const VERTEX_SHADER_SOURCE = `#version 300 es
 const vec2 positions[4] = vec2[4](
@@ -114,12 +112,15 @@ resize();
 
 // Set everything up:
 //  - Create shared runtime
-//  - Create raw byte buffer for RGBA pixels
+//  - Create typed shared object with RGBA8 framebuffer schema
 //  - Spawn worker and attach it to runtime
 const rt = SharedRuntime.host();
-// One frame = width * height pixels, RGBA8 = 4 bytes per pixel.
-// We allocate exactly one frame worth of bytes in each shared slot.
-const pixels = rt.createSharedObject("pixels", { byteLength: FRAME_WIDTH * FRAME_HEIGHT * 4 });
+const video = rt.createSharedObject("video", VideoSchema);
+await video.write({
+  width: FRAME_WIDTH,
+  height: FRAME_HEIGHT,
+  feed: new Uint8Array(FRAME_WIDTH * FRAME_HEIGHT * 4),
+});
 
 const pixelWriter = new Worker(new URL("./pixel-writer.worker.js", import.meta.url), {
   type: "module",
@@ -128,7 +129,7 @@ await rt.attachWorker("pixel-writer", pixelWriter);
 
 // Render whenever a new frame is published.
 const renderLatestFrame = (): void => {
-  const snap = pixels.readLatest();
+  const snap = video.read();
   if (!snap) return;
 
   gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -136,14 +137,14 @@ const renderLatestFrame = (): void => {
     gl.TEXTURE_2D,
     0,
     gl.RGBA,
-    FRAME_WIDTH,
-    FRAME_HEIGHT,
+    snap.width,
+    snap.height,
     0,
     gl.RGBA,
     gl.UNSIGNED_BYTE,
-    snap.bytes,
+    snap.feed,
   );
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 };
 
-pixels.subscribe(renderLatestFrame);
+video.subscribe(renderLatestFrame);

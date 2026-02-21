@@ -31,6 +31,7 @@ export default {
           "examples/multiple-writers-lock/index.html",
         ),
         "examples/nested-schema/index": path.resolve(rootDir, "examples/nested-schema/index.html"),
+        "examples/utf8-strings/index": path.resolve(rootDir, "examples/utf8-strings/index.html"),
         "examples/webgl-canvas/index": path.resolve(rootDir, "examples/webgl-canvas/index.html"),
       },
     },

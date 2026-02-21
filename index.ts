@@ -8,6 +8,8 @@ export {
   type SharedObjectReadSnapshot,
   type SharedObjectWriteCallback,
   type SharedObjectWriteContext,
+  type TypedSharedObjectWriteCallback,
+  type TypedSharedObjectWriteContext,
 } from "./shared-object.js";
 
 export {

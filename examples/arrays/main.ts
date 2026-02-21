@@ -35,7 +35,10 @@ for (let tick = 0; ; tick += 1) {
     samples[i] = Math.sin(phase + i * 0.35) * 10;
   }
 
-  const flags = Array.from({ length: 8 }, (_, i) => ((tick + i) % 3 === 0 ? 1 : 0));
+  const flags = new Uint8Array(8);
+  for (let i = 0; i < flags.length; i += 1) {
+    flags[i] = (tick + i) % 3 === 0 ? 1 : 0;
+  }
   const gain = 0.8 + 0.2 * Math.sin(phase * 0.5);
 
   await frame.write({

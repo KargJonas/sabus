@@ -9,5 +9,6 @@ All pixel data is generated *in JavaScript* in a dedicated worker, and only disp
 
 ## Files
 
-- `pixel-writer.worker.ts`: generates RGBA frames and writes bytes into the shared `pixels` object.
-- `main.ts`: reads the latest frame from shared memory and uploads it to a WebGL texture for fullscreen drawing.
+- `video-schema.ts`: defines the shared framebuffer with `[Type.Rgba8, width * height]`.
+- `pixel-writer.worker.ts`: generates RGBA frames and writes directly into the shared schema field.
+- `main.ts`: reads the latest typed snapshot and uploads `feed` to a WebGL texture for fullscreen drawing.

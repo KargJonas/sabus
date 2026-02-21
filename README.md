@@ -58,6 +58,7 @@ For worker-side usage and more complete patterns, check `examples/`.
 - `SharedRuntime` to coordinate shared objects across host and workers.
 - `SharedObject` with FIFO write lock and atomic latest-read behavior.
 - `TypedSharedObject` for schema-based typed reads and writes.
+- Bulk array writes (`TypedArray#set`) for all schema array fields, including `Type.Rgba8`.
 - `schema` helpers (`Type`, `computeLayout`, `readSnapshot`, `writeFields`).
 
 ## Requirements

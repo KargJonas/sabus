@@ -1,13 +1,11 @@
 import SharedRuntime from "../../shared-runtime.js";
-
-const FRAME_WIDTH = 320;
-const FRAME_HEIGHT = 180;
+import { FRAME_HEIGHT, FRAME_WIDTH, VideoSchema } from "./video-schema.js";
 
 // Set everything up from the worker-side:
 //  - "Join" shared runtime
 //  - Open previously defined shared object
 const rt = await SharedRuntime.worker();
-const pixels = rt.openSharedObject("pixels");
+const video = rt.openSharedObject("video", VideoSchema);
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -31,8 +29,9 @@ let frame = 0;
 while (true) {
   const time = frame * 0.04;
 
-  await pixels.requestWrite(({ bytes }) => {
-    fillFrame(bytes, time);
+  await video.requestWrite(({ view, set }) => {
+    set({ width: FRAME_WIDTH, height: FRAME_HEIGHT });
+    fillFrame(view.feed, time);
   });
 
   frame += 1;

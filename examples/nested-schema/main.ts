@@ -7,10 +7,11 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 // Set everything up:
 //  - Create shared runtime
 //  - Create shared object based on schema definition
-//  - Spawn a worker
+//  - Spawn a worker and attach it to runtime
 const rt = SharedRuntime.host();
 const particle = rt.createSharedObject("particle", ParticleSchema);
-const worker = await rt.spawnWorker(new URL("./reader.worker.js", import.meta.url).href, "reader");
+const worker = new Worker(new URL("./reader.worker.js", import.meta.url), { type: "module" });
+await rt.attachWorker("reader", worker);
 
 // Print any messages we receive from the worker
 worker.addEventListener("message", (event: MessageEvent<unknown>) => {

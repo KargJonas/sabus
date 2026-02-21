@@ -15,6 +15,9 @@ export default {
     port: 3000,
     strictPort: true,
   },
+  worker: {
+    format: "es",
+  },
   build: {
     outDir: "dist",
     rollupOptions: {

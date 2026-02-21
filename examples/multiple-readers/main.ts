@@ -9,15 +9,17 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 // Set everything up:
 //  - Create shared runtime
 //  - Create shared object based on schema definition
-//  - Spawn workers that read using different strategies
+//  - Spawn workers and attach them to runtime
 const rt = SharedRuntime.host();
 const counter = rt.createSharedObject("counter", CounterSchema);
-const fastReader = await rt.spawnWorker(
-  new URL("./reader-fast.worker.js", import.meta.url).href, "reader-fast");
-const slowReader = await rt.spawnWorker(
-  new URL("./reader-slow.worker.js", import.meta.url).href, "reader-slow");
-const subscribedReader = await rt.spawnWorker(
-  new URL("./reader-subscribed.worker.js", import.meta.url).href, "reader-subscribed");
+const fastReader = new Worker(new URL("./reader-fast.worker.js", import.meta.url), { type: "module" });
+await rt.attachWorker("reader-fast", fastReader);
+const slowReader = new Worker(new URL("./reader-slow.worker.js", import.meta.url), { type: "module" });
+await rt.attachWorker("reader-slow", slowReader);
+const subscribedReader = new Worker(new URL("./reader-subscribed.worker.js", import.meta.url), {
+  type: "module",
+});
+await rt.attachWorker("reader-subscribed", subscribedReader);
 
 for (const worker of [fastReader, slowReader, subscribedReader]) {
   worker.addEventListener("message", (event: MessageEvent<unknown>) => {

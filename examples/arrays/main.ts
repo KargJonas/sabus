@@ -10,10 +10,11 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 // Set everything up:
 //  - Create shared runtime
 //  - Create shared object based on schema definition
-//  - Spawn a worker that reads the shared arrays
+//  - Spawn a worker and attach it to runtime
 const rt = SharedRuntime.host();
 const frame = rt.createSharedObject("sensor-frame", SensorFrameSchema);
-const reader = await rt.spawnWorker(new URL("./reader.worker.js", import.meta.url).href, "reader");
+const reader = new Worker(new URL("./reader.worker.js", import.meta.url), { type: "module" });
+await rt.attachWorker("reader", reader);
 
 reader.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (typeof event.data === "string") {

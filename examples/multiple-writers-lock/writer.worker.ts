@@ -20,7 +20,7 @@ interface WriterSetupData {
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const rt = await SharedRuntime.worker();
 const setupData = rt.getWorkerSetupData<WriterSetupData>();
-if (!setupData) throw new Error("writer.worker requires setupData in spawnWorker()");
+if (!setupData) throw new Error("writer.worker requires setupData in attachWorker()");
 
 const {lockObjectId, writerId, label, holdMs, startDelayMs, betweenRoundsMs} = setupData;
 const lockState = rt.openSharedObject(lockObjectId);

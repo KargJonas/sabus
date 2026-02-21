@@ -162,9 +162,8 @@ function isNestedSchema(raw: SchemaDefinition[string]): raw is SchemaDefinition 
 function maxAlignment(schema: SchemaDefinition): number {
   let align = 1;
   for (const raw of Object.values(schema)) {
-    if (isNestedSchema(raw)) {
-      align = Math.max(align, maxAlignment(raw));
-    } else {
+    if (isNestedSchema(raw)) align = Math.max(align, maxAlignment(raw));
+    else {
       const type = typeof raw === "number" ? raw : raw[0];
       align = Math.max(align, TYPE_SIZE[type]);
     }
@@ -195,11 +194,8 @@ export function computeLayout<S extends SchemaDefinition>(schema: S): Layout<S> 
       const count = typeof raw === "number" ? 1 : raw[1];
       const elemSize = TYPE_SIZE[type];
       offset = Math.ceil(offset / elemSize) * elemSize;
-      if (count === 1) {
-        fields[key] = { kind: "scalar", type, offset };
-      } else {
-        fields[key] = { kind: "array", type, offset, count };
-      }
+      if (count === 1) fields[key] = { kind: "scalar", type, offset };
+      else fields[key] = { kind: "array", type, offset, count };
       offset += elemSize * count;
     }
   }
@@ -267,22 +263,12 @@ export function writeFields<S extends SchemaDefinition>(
         const setter = TYPE_SETTER[field.type] as keyof DataView;
         const elemSize = TYPE_SIZE[field.type];
         for (let i = 0; i < field.count; i++) {
-          (dataView[setter] as Function).call(
-            dataView,
-            abs + i * elemSize,
-            src[i],
-            true,
-          );
+          (dataView[setter] as Function).call(dataView, abs + i * elemSize, src[i], true);
         }
         break;
       }
       case "nested": {
-        writeFields(
-          field.layout,
-          dataView,
-          val as Partial<SchemaWriteValues<SchemaDefinition>>,
-          abs,
-        );
+        writeFields(field.layout, dataView, val as Partial<SchemaWriteValues<SchemaDefinition>>, abs);
         break;
       }
     }

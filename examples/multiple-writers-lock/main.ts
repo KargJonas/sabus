@@ -15,7 +15,7 @@ const HOLD_MS_OFFSET = 8;
 const LOCK_STATE_BYTE_LENGTH = 12;
 
 const lockObjectId = "write-lock-demo";
-const writerScriptUrl = new URL("./writer.worker.js", import.meta.url).href;
+const writerScriptUrl = new URL("./writer.worker.js", import.meta.url);
 
 const log = (text: string): void => {
   document.body.innerHTML += `${text}<br>`;
@@ -78,13 +78,15 @@ const attachWorkerLogger = (workerHandle: Worker): void => {
   });
 };
 
-const writerAPromise = rt.spawnWorker(writerScriptUrl, "writer-A", writerASetup);
-const writerBPromise = rt.spawnWorker(writerScriptUrl, "writer-B", writerBSetup);
-const writerCPromise = rt.spawnWorker(writerScriptUrl, "writer-C", writerCSetup);
+const writerA = new Worker(writerScriptUrl, { type: "module" });
+const writerB = new Worker(writerScriptUrl, { type: "module" });
+const writerC = new Worker(writerScriptUrl, { type: "module" });
 
-const writerA = await writerAPromise;
-const writerB = await writerBPromise;
-const writerC = await writerCPromise;
+await Promise.all([
+  rt.attachWorker("writer-A", writerA, writerASetup),
+  rt.attachWorker("writer-B", writerB, writerBSetup),
+  rt.attachWorker("writer-C", writerC, writerCSetup),
+]);
 
 attachWorkerLogger(writerA);
 attachWorkerLogger(writerB);

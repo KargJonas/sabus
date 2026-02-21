@@ -131,11 +131,8 @@ export class SharedObject {
     await this.waitForTurn(ticket);
 
     Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, localThreadId);
-    try {
-      return await this.writeUnlocked(cb);
-    } finally {
-      this.releaseWriteLock();
-    }
+    try     { return await this.writeUnlocked(cb); }
+    finally { this.releaseWriteLock(); }
   }
 
   private async writeUnlocked<TReturn>(
@@ -171,9 +168,7 @@ export class SharedObject {
       const bytes = new Uint8Array(this.dataSab, offset, this.byteLength);
       const dataView = new DataView(this.dataSab, offset, this.byteLength);
       const seq2 = Atomics.load(this.control, CTRL_SEQ);
-      if (seq1 === seq2) {
-        return { seq: seq1 >>> 0, bytes, dataView };
-      }
+      if (seq1 === seq2) return { seq: seq1 >>> 0, bytes, dataView };
     }
     return null;
   }
@@ -181,16 +176,12 @@ export class SharedObject {
   private async waitForTurn(ticket: number): Promise<void> {
     for (; ;) {
       const servingTicket = Atomics.load(this.control, CTRL_SERVING_TICKET);
-      if (servingTicket === ticket) {
-        return;
-      }
+      if (servingTicket === ticket) return;
 
       const waitAsync = atomicsWithWaitAsync.waitAsync;
       if (typeof waitAsync === "function") {
         const waitResult = waitAsync(this.control, CTRL_SERVING_TICKET, servingTicket);
-        if (typeof waitResult.value !== "string") {
-          await waitResult.value;
-        }
+        if (typeof waitResult.value !== "string") await waitResult.value;
         continue;
       }
 
@@ -202,9 +193,7 @@ export class SharedObject {
   private releaseWriteLock(): void {
     const ownerThreadId = Atomics.load(this.control, CTRL_WRITE_OWNER_THREAD_ID);
     if (ownerThreadId !== localThreadId) {
-      throw new Error(
-        `Thread ${localThreadId} attempted to release write lock owned by ${ownerThreadId}`,
-      );
+      throw new Error(`Thread ${localThreadId} attempted to release write lock owned by ${ownerThreadId}`);
     }
 
     Atomics.store(this.control, CTRL_WRITE_OWNER_THREAD_ID, NO_OWNER_THREAD_ID);
@@ -223,9 +212,7 @@ export class TypedSharedObject<S extends SchemaDefinition> {
   }
 
   async write(values: Partial<SchemaWriteValues<S>>): Promise<void> {
-    await this.inner.requestWrite(({ dataView }) => {
-      writeFields(this.layout, dataView, values);
-    });
+    await this.inner.requestWrite(({ dataView }) => writeFields(this.layout, dataView, values));
   }
 
   read(): (SchemaValues<S> & { seq: number }) | null {

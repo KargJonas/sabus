@@ -115,13 +115,16 @@ resize();
 // Set everything up:
 //  - Create shared runtime
 //  - Create raw byte buffer for RGBA pixels
-//  - Spawn worker that writes frames into the shared buffer
+//  - Spawn worker and attach it to runtime
 const rt = SharedRuntime.host();
 // One frame = width * height pixels, RGBA8 = 4 bytes per pixel.
 // We allocate exactly one frame worth of bytes in each shared slot.
 const pixels = rt.createSharedObject("pixels", { byteLength: FRAME_WIDTH * FRAME_HEIGHT * 4 });
 
-await rt.spawnWorker(new URL("./pixel-writer.worker.js", import.meta.url).href, "pixel-writer");
+const pixelWriter = new Worker(new URL("./pixel-writer.worker.js", import.meta.url), {
+  type: "module",
+});
+await rt.attachWorker("pixel-writer", pixelWriter);
 
 // Render whenever a new frame is published.
 const renderLatestFrame = (): void => {

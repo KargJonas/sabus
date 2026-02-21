@@ -6,8 +6,10 @@
     "strict": true,
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM", "WebWorker"],
+    "declaration": true,
+    "declarationMap": true,
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["*.ts", "examples/**/*.ts"]
+  "include": ["*.ts"]
 }

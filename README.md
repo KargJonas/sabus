@@ -1,21 +1,79 @@
-# Fast Worker Communication
+# sabus
 
-This is a minimal library for near-zero-overhead inter-worker communication in JavaScript.
-
-The idea is to use [SharedArrayBuffers](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer) (SABs) to allow exchanging data between workers without having to use the default message-passing API, which becomes unusably slow when larger amounts data are transferred, or when the frequency of transfers is high.
+Minimal SharedArrayBuffer worker bus for low-overhead cross-worker data sharing.
 
 > [!TIP]
-> Please have a look at the `examples/` directory. It contains a number of small, well documented examples. Each subdirectory also includes a `README` file that explains the overall idea of that specific example.
+> Check the `examples/` directory. Each example has a focused `README` with context and usage notes.
 
-### Features
+## Install
 
-To facilitate coordinated reading and writing of SABs, this library uses the following system:
-- A central SharedRuntime coordinates workers and allows creation of SharedObjects.
-  - On the host side, you spawn workers however your environment requires and attach them to the runtime.
-- SharedObject is an abstraction over SharedArrayBuffer with:
-  - A clear schema definition that describes how data is laid out in the buffer and ensures type safety.
-  - Write permission handling
-  - An internal ring-buffer-like data structure to prevent reading incomplete writes
-  - A system to notify subscribed workers of changes (this happens through message-passing)
-- SharedObjects are always readable from all workers/threads, but a write-lock must be acquired before being able to write to the buffer.
-- Write locks are handed out on a FIFO basis.
+```bash
+npm install sabus
+```
+
+## Quick start
+
+Host:
+
+```ts
+import { SharedRuntime, Type } from "sabus";
+
+const schema = {
+  count: Type.Int32,
+} as const;
+
+const host = SharedRuntime.host();
+const counter = host.createSharedObject("counter", schema);
+const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+
+await host.attachWorker("reader", worker);
+
+await counter.write({ count: 1 });
+console.log(counter.read()?.count); // 1
+```
+
+Worker (`worker.ts`):
+
+```ts
+import { SharedRuntime, Type } from "sabus";
+
+const schema = {
+  count: Type.Int32,
+} as const;
+
+const runtime = await SharedRuntime.worker();
+const counter = runtime.openSharedObject("counter", schema);
+
+counter.subscribe(() => {
+  const latest = counter.read();
+  if (latest) console.log("count:", latest.count, "seq:", latest.seq);
+});
+```
+
+For worker-side usage and more complete patterns, check `examples/`.
+
+## What it provides
+
+- `SharedRuntime` to coordinate shared objects across host and workers.
+- `SharedObject` with FIFO write lock and atomic latest-read behavior.
+- `TypedSharedObject` for schema-based typed reads and writes.
+- `schema` helpers (`Type`, `computeLayout`, `readSnapshot`, `writeFields`).
+
+## Requirements
+
+- Environment with `SharedArrayBuffer` support.
+- Browser usage needs cross-origin isolation headers (`COOP`/`COEP`).
+
+## Development
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+Example app:
+
+```bash
+npm run dev
+```

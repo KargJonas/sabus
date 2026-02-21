@@ -1,13 +1,49 @@
 {
-  "name": "counter-workers-prototype",
-  "private": true,
+  "name": "sabus",
+  "version": "0.1.0",
+  "description": "Minimal SharedArrayBuffer worker bus for low-overhead cross-worker data sharing.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KargJonas/sabus.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KargJonas/sabus/issues"
+  },
+  "homepage": "https://github.com/KargJonas/sabus#readme",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "sharedarraybuffer",
+    "worker",
+    "atomics",
+    "shared-memory"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
   "scripts": {
-    "build": "vite build",
+    "clean": "rm -rf dist test-dist",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "build:examples": "vite build",
     "dev": "vite --host 0.0.0.0 --port 3000 --strictPort",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:build": "tsc -p tsconfig.test.json",
-    "test": "npm run test:build && node --test test/*.test.mjs"
+    "test": "npm run test:build && node --test test/*.test.mjs",
+    "prepack": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "typescript": "^5.4.5",

@@ -1,6 +1,9 @@
 {
-  "name": "sabus",
+  "name": "@kargjonas/sabus",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Minimal SharedArrayBuffer worker bus for low-overhead cross-worker data sharing.",
   "license": "Apache-2.0",
   "repository": {

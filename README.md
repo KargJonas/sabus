@@ -2,13 +2,21 @@
 
 Minimal SharedArrayBuffer worker bus for low-overhead cross-worker data sharing.
 
-> [!TIP]
+> [!NOTE]
 > Check the `examples/` directory. Each example has a focused `README` with context and usage notes.
 
 ## Install
 
+Install from command line:
+
 ```bash
-npm install sabus
+npm install @kargjonas/sabus@0.1.0
+```
+
+Install via `package.json`:
+
+```bash
+"@kargjonas/sabus": "0.1.0"
 ```
 
 ## Quick start
